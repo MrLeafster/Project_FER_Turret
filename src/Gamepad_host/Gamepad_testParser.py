@@ -1,7 +1,7 @@
 import serial
 import struct
 
-mController = serial.Serial("COM6")
+mController = serial.Serial("COM14")
 
 while mController.isOpen():
     random_byte = mController.read()
@@ -19,7 +19,7 @@ while mController.isOpen():
     data = bytes([])
     random_byte = mController.read()
 
-    while random_byte[0] != 17:
+    while random_byte[0] != 0x17:
         data += random_byte
         random_byte = mController.read()
 
@@ -37,4 +37,4 @@ while mController.isOpen():
     throttleL = struct.unpack("<i", data[20:24])[0]
     throttleR = struct.unpack("<i", data[24:28])[0]
 
-    print(f"dpad = {dpad: 1d}, buttons = {buttons: 3d}, axisLX = {axisLX: 4d}, axisLY = {axisLY: 4d}, axisRX = {axisRX: 4d}, axisRY = {axisRY: 4d}, throttleL = {throttleL: 5d}, throttleR = {throttleR: 5d}")
+    print(f"dpad = {dpad: 1d}, buttons = {buttons: 4d}, axisLX = {axisLX: 4d}, axisLY = {axisLY: 4d}, axisRX = {axisRX: 4d}, axisRY = {axisRY: 4d}, throttleL = {throttleL: 5d}, throttleR = {throttleR: 5d}")
