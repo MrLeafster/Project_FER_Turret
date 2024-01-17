@@ -22,69 +22,12 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include "gamepad_logic.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
-typedef union {
-    struct {
-        uint8_t dpad;
-
-        uint8_t buttons;
-
-        int32_t axisLX;
-        int32_t axisLY;
-
-        int32_t axisRX;
-        int32_t axisRY;
-
-        int32_t throttleL;
-        int32_t throttleR;
-
-    } gamepadInfo;
-
-    uint8_t byteArray[28];
-
-} gamepadData;
-
-#define GAMEPAD_BUFFER_SIZE 28
-
-#define GAMEPAD_CONNECTED    0x10  // Byte which signals that gamepad has connected to the bluetooth host
-#define GAMEPAD_DISCONNECTED 0x11  // Byte which signals that gamepad has disconnected from the bluetooth host
-#define GAMEPAD_DATA         0x12  // Byte which signals that gamepad data will be sent
-#define GAMEPAD_END_DATA     0x17  // Byte which signals that gamepad sent all the wanted data
-
-uint8_t rx_data;
-static uint8_t buffer_ind = 0;
-static uint8_t recieving_state = 0;
-
-volatile uint8_t gamepad_ready = 0;
-gamepadData gamepad_input;
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
-	if(huart->Instance == USART2){
-
-		switch(recieving_state){
-			case 0:
-				if(rx_data == GAMEPAD_DATA)
-					recieving_state = 1;
-				break;
-
-			case 1:
-				if(rx_data == GAMEPAD_END_DATA){
-					recieving_state = 0;
-					gamepad_ready = 1;
-					buffer_ind = 0;
-				} else {
-					gamepad_input.byteArray[buffer_ind++] = rx_data;
-				}
-				break;
-		}
-
-		HAL_UART_Receive_IT(huart, &rx_data, 1);
-	}
-}
 
 /* USER CODE END PTD */
 
@@ -99,7 +42,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+
 UART_HandleTypeDef huart2;
+uint8_t rx_data;
 
 /* USER CODE BEGIN PV */
 
@@ -115,6 +60,13 @@ static void MX_USART2_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+	if(huart->Instance == USART2){
+		gamepad_procesByte(&rx_data);
+		HAL_UART_Receive_IT(huart, &rx_data, 1);
+	}
+}
 
 /* USER CODE END 0 */
 
@@ -150,6 +102,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   HAL_UART_Receive_IT(&huart2, &rx_data, 1);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -158,8 +111,11 @@ int main(void)
   {
     /* USER CODE END WHILE */
 
-	  while(!gamepad_ready);
+	  gamepad_waitForData();
+
 	  uint8_t dpad = gamepad_input.gamepadInfo.dpad;
+
+	  gamepad_enableNewData();
 
     /* USER CODE BEGIN 3 */
   }

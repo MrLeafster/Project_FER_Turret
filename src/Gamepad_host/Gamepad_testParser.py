@@ -1,7 +1,7 @@
 import serial
 import struct
 
-mController = serial.Serial("COM14")
+mController = serial.Serial("COM6")
 
 while mController.isOpen():
     random_byte = mController.read()
