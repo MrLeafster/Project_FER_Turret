@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <Bluepad32.h>
 
+#include "led_logic.h"
+
 // Union that keeps the gamepad data in format ready to be sent to master.
 typedef union {
     struct {

@@ -25,6 +25,8 @@ void gamepadLoop(){
 
 void onConnectedController(ControllerPtr ctl) {
     if (myController == nullptr) {
+        ledSetMode(GAMEPAD_CONNECTED);
+
         Serial.write(GAMEPAD_CONNECTED);
         myController = ctl;
     }
@@ -32,6 +34,8 @@ void onConnectedController(ControllerPtr ctl) {
 
 void onDisconnectedController(ControllerPtr ctl) {
     if (myController == ctl) { 
+        ledSetMode(GAMEPAD_DISCONNECTED);
+
         Serial.write(GAMEPAD_DISCONNECTED);
         myController = nullptr;
     }
