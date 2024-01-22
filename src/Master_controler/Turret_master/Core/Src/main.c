@@ -73,16 +73,39 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	}
 }
 
-uint32_t convertToServoPWM(int32_t controllerValue) {
-	float leftY = 3125.0f;
-	float rightY = 6250.0f;
+float convertToDeltaAngle(int32_t controllerValue, uint32_t deltaT) {
+	float leftY = -30.0f;
+	float rightY = 30.0f;
 
 	float leftX = 512.0f;
 	float rightX = -512.0f;
 
-	float y = (controllerValue - leftX) / (rightX - leftX) * (rightY - leftY) + leftY;
+	float omega = (controllerValue - leftX) / (rightX - leftX)
+			* (rightY - leftY) + leftY;
+
+	return omega * deltaT / 1000.0f;
+}
+
+uint32_t convertAngleToPWM(float angle) {
+	float leftY = 3125.0f;
+	float rightY = 6250.0f;
+
+	float leftX = -60.0f;
+	float rightX = 60.0f;
+
+	float y = (angle - leftX) / (rightX - leftX) * (rightY - leftY) + leftY;
 
 	return (uint32_t) y;
+}
+
+float clamp(float x, float min, float max) {
+	if (x <= min) {
+		return min;
+	} else if (x >= max) {
+		return max;
+	} else {
+		return x;
+	}
 }
 
 /* USER CODE END 0 */
@@ -125,7 +148,7 @@ int main(void) {
 
 	htim1.Instance->PSC = 7;
 	htim1.Instance->ARR = 62500;
-	htim1.Instance->CCR1 = 4627;
+	htim1.Instance->CCR1 = convertAngleToPWM(0.0f);
 	htim1.Instance->EGR |= 0x01;
 
 	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
@@ -136,7 +159,11 @@ int main(void) {
 
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
 
-	uint32_t oldServoPWM = htim1.Instance->CCR1;
+	float pitch = 0.0f;
+
+	uint8_t firstTime = 1;
+	uint32_t lastT = 0;
+	uint32_t lastPWM = convertAngleToPWM(0.0f);
 
 	/* USER CODE END 2 */
 
@@ -146,17 +173,23 @@ int main(void) {
 
 		gamepad_waitForData();
 
-		uint8_t dpad = gamepad_input.gamepadInfo.dpad;
 		int32_t x = gamepad_input.gamepadInfo.axisRX;
 		int32_t y = gamepad_input.gamepadInfo.axisRY;
+		uint8_t btnA = gamepad_input.gamepadInfo.buttons & 0x01;
+		uint8_t btnRB = gamepad_input.gamepadInfo.buttons & 0x20;
 
+		uint8_t sw1 = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_10);
+		uint8_t sw2 = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_11);
+
+		// stepper control (yaw)
 		if (x > 0) {
 			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
 		} else if (x < 0) {
 			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
 		}
 
-		if (x == 0 && htim2.Instance->CCR1 != 0) {
+		if (x == 0 && htim2.Instance->CCR1 != 0 || x > 0 && !sw2
+				|| x < 0 && !sw1) {
 			htim2.Instance->CCR1 = 0;
 			htim2.Instance->EGR |= 0x01;
 		} else if (x != 0 && htim2.Instance->CCR1 == 0) {
@@ -165,11 +198,29 @@ int main(void) {
 			htim2.Instance->EGR |= 0x01;
 		}
 
-		uint32_t servoPWM = convertToServoPWM(y);
-		if (servoPWM != oldServoPWM) {
-			htim1.Instance->CCR1 = servoPWM;
-			oldServoPWM = servoPWM;
+		// servo control (pitch)
+		if (firstTime) {
+			firstTime = 0;
+			lastT = HAL_GetTick();
+		} else {
+			uint32_t currentT = HAL_GetTick();
+
+			float delta = convertToDeltaAngle(y, currentT - lastT);
+			pitch = clamp(pitch + delta, -60.0f, 60.0f);
+
+			uint32_t currentPWM = convertAngleToPWM(pitch);
+			if (currentPWM != lastPWM) {
+				htim1.Instance->CCR1 = currentPWM;
+				htim1.Instance->EGR |= 0x01;
+			}
+
+			lastPWM = currentPWM;
+			lastT = currentT;
 		}
+
+		// trigger control
+		HAL_GPIO_WritePin(GPIOE, GPIO_PIN_0,
+				(btnA || btnRB ? GPIO_PIN_SET : GPIO_PIN_RESET));
 
 		gamepad_enableNewData();
 
@@ -399,7 +450,7 @@ static void MX_GPIO_Init(void) {
 	__HAL_RCC_GPIOD_CLK_ENABLE();
 
 	/*Configure GPIO pin Output Level */
-	HAL_GPIO_WritePin(CS_I2C_SPI_GPIO_Port, CS_I2C_SPI_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOE, CS_I2C_SPI_Pin | trig_Pin, GPIO_PIN_RESET);
 
 	/*Configure GPIO pin Output Level */
 	HAL_GPIO_WritePin(OTG_FS_PowerSwitchOn_GPIO_Port, OTG_FS_PowerSwitchOn_Pin,
@@ -413,19 +464,22 @@ static void MX_GPIO_Init(void) {
 			LD4_Pin | LD3_Pin | LD5_Pin | LD6_Pin | Audio_RST_Pin,
 			GPIO_PIN_RESET);
 
-	/*Configure GPIO pin : CS_I2C_SPI_Pin */
-	GPIO_InitStruct.Pin = CS_I2C_SPI_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(CS_I2C_SPI_GPIO_Port, &GPIO_InitStruct);
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(GPIOC, sw1_Pin | sw2_Pin, GPIO_PIN_RESET);
 
-	/*Configure GPIO pin : OTG_FS_PowerSwitchOn_Pin */
-	GPIO_InitStruct.Pin = OTG_FS_PowerSwitchOn_Pin;
+	/*Configure GPIO pins : CS_I2C_SPI_Pin trig_Pin */
+	GPIO_InitStruct.Pin = CS_I2C_SPI_Pin | trig_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(OTG_FS_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
+	HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+	/*Configure GPIO pins : OTG_FS_PowerSwitchOn_Pin sw1_Pin sw2_Pin */
+	GPIO_InitStruct.Pin = OTG_FS_PowerSwitchOn_Pin | sw1_Pin | sw2_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
 	/*Configure GPIO pin : PDM_OUT_Pin */
 	GPIO_InitStruct.Pin = PDM_OUT_Pin;
@@ -486,8 +540,8 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : I2S3_MCK_Pin I2S3_SCK_Pin I2S3_SD_Pin */
-	GPIO_InitStruct.Pin = I2S3_MCK_Pin | I2S3_SCK_Pin | I2S3_SD_Pin;
+	/*Configure GPIO pins : I2S3_MCK_Pin I2S3_SD_Pin */
+	GPIO_InitStruct.Pin = I2S3_MCK_Pin | I2S3_SD_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
